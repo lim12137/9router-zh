@@ -16,7 +16,7 @@ on:
       - completed
 
 env:
-  GHCR_IMAGE: ghcr.io/${{ github.repository_owner }}/9router
+  GHCR_IMAGE: ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}
 
 jobs:
   build-per-platform:
@@ -36,7 +36,7 @@ jobs:
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
     concurrency:
-      group: docker-publish-${{ github.event_name }}-${{ github.ref_name || 'default' }}
+      group: docker-publish-${{ github.event_name }}-${{ github.ref_name || 'default' }}-${{ matrix.platform_id }}
       cancel-in-progress: true
     permissions:
       contents: read
