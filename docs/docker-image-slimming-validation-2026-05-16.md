@@ -12,9 +12,10 @@
 - `npm install --omit=optional` 不能用于当前 builder 阶段
   - 会导致构建缺少 `lightningcss` 的 musl 原生模块
   - 也会导致 `better-sqlite3` 在 Next 构建期被静态解析时报缺失
-- 当前 builder 采用 `package-lock.json + npm ci`
-  - 保持构建可复现
+- 当前 builder 采用完整 `npm install`
+  - 先保证 GitHub Actions 构建恢复
   - 保留构建所需原生依赖
+  - 仓库当前未跟踪根 `package-lock.json`，所以暂不切到 `npm ci`
 - 运行镜像仍然通过 standalone 复制保持精简
   - 最终镜像并不会把 builder 的完整 `node_modules` 原样带进去
 

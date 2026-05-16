@@ -71,7 +71,7 @@ git diff -- Dockerfile .github/workflows/docker-publish.yml
 ### Dockerfile
 
 - 去掉 `apk upgrade`
-- builder 安装依赖改为 `package-lock.json + npm ci`
+- builder 安装依赖恢复为完整 `npm install`
 - runner 阶段安装 `su-exec` 时也去掉 `apk upgrade`
 
 ## 预期收益
@@ -80,6 +80,7 @@ git diff -- Dockerfile .github/workflows/docker-publish.yml
 - 结合原生 `arm64` runner，`arm64 next build` 理论上应远低于当前 `650s 到 718s`。
 - Dockerfile 轻量化主要是补掉几十秒级的浪费，不是主因，但应该一并保留。
 - 已验证 `--omit=optional` 会导致构建缺少 `lightningcss` 和 `better-sqlite3`，因此不能继续用于当前 builder 阶段。
+- 由于仓库当前未跟踪根 `package-lock.json`，builder 先恢复为 `npm install`，后续如要进一步提速，再单独评估是否把锁文件纳入版本库并切换到 `npm ci`。
 
 ## 风险与说明
 
