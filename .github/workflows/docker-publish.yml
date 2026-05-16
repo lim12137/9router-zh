@@ -25,12 +25,22 @@ env:
   GHCR_IMAGE: ghcr.io/${{ github.repository_owner }}/9router
 
 jobs:
-  build-and-push:
+  build-per-platform:
     if: |
       (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success') &&
       (github.event_name != 'push' || startsWith(github.ref, 'refs/tags/') || github.ref_name == github.event.repository.default_branch) &&
       (github.event_name != 'push' || !contains(github.event.head_commit.message, '[skip docker]'))
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            platform_id: amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            platform_id: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     concurrency:
       group: docker-publish-${{ github.ref_name || 'default' }}
       cancel-in-progress: true
@@ -41,9 +51,91 @@ jobs:
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.repository.default_branch }}
 
+      - name: Resolve image names and publish flags
+        id: vars
+        shell: bash
+        run: |
+          dockerhub_image="${{ vars.DOCKERHUB_IMAGE }}"
+          if [ -z "$dockerhub_image" ]; then
+            dockerhub_image="${{ github.repository_owner }}/9router"
+          fi
+          echo "dockerhub_image=$dockerhub_image" >> "$GITHUB_OUTPUT"
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.push_to_dockerhub }}" != "true" ]; then
+            echo "publish_dockerhub=false" >> "$GITHUB_OUTPUT"
+          elif [ -n "${{ secrets.DOCKERHUB_USERNAME }}" ] && [ -n "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
+            echo "publish_dockerhub=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish_dockerhub=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to Docker Hub
+        if: ${{ steps.vars.outputs.publish_dockerhub == 'true' }}
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.GHCR_IMAGE }}
+          tags: |
+            type=ref,event=branch,suffix=-cn
+            type=ref,event=tag,suffix=-cn
+            type=semver,pattern={{version}},suffix=-cn
+            type=sha,format=short,prefix=sha-,suffix=-cn
+            type=schedule,pattern={{date 'YYYYMMDD' tz='Asia/Shanghai'}},prefix=nightly-,suffix=-cn
+            type=raw,value=latest-cn,enable={{is_default_branch}}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,name=${{ env.GHCR_IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=registry,ref=${{ env.GHCR_IMAGE }}:buildcache-${{ matrix.platform_id }}
+          cache-to: type=registry,ref=${{ env.GHCR_IMAGE }}:buildcache-${{ matrix.platform_id }},mode=max
+          provenance: false
+          sbom: false
+
+      - name: Export digest
+        shell: bash
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.platform_id }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  publish-manifests:
+    if: ${{ needs.build-per-platform.result == 'success' }}
+    needs: build-per-platform
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
       - name: Resolve image names and publish flags
         id: vars
         shell: bash
@@ -108,30 +200,32 @@ jobs:
             type=schedule,pattern={{date 'YYYYMMDD' tz='Asia/Shanghai'}},prefix=nightly-,suffix=-cn
             type=raw,value=latest-cn,enable={{is_default_branch}}
 
-      - name: Build and push (GHCR only)
-        if: ${{ steps.vars.outputs.publish_dockerhub != 'true' }}
-        uses: docker/build-push-action@v6
+      - name: Download digests
+        uses: actions/download-artifact@v4
         with:
-          context: .
-          push: true
-          tags: ${{ steps.meta_ghcr.outputs.tags }}
-          labels: ${{ steps.meta_ghcr.outputs.labels }}
-          cache-from: type=registry,ref=${{ env.GHCR_IMAGE }}:buildcache
-          cache-to: type=registry,ref=${{ env.GHCR_IMAGE }}:buildcache,mode=max
-          platforms: linux/amd64,linux/arm64
-          provenance: false
-          sbom: false
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
 
-      - name: Build and push (GHCR + Docker Hub)
-        if: ${{ steps.vars.outputs.publish_dockerhub == 'true' }}
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.meta_all.outputs.tags }}
-          labels: ${{ steps.meta_all.outputs.labels }}
-          cache-from: type=registry,ref=${{ env.GHCR_IMAGE }}:buildcache
-          cache-to: type=registry,ref=${{ env.GHCR_IMAGE }}:buildcache,mode=max
-          platforms: linux/amd64,linux/arm64
-          provenance: false
-          sbom: false
+      - name: Create manifest list
+        shell: bash
+        env:
+          TAGS: ${{ steps.vars.outputs.publish_dockerhub == 'true' && steps.meta_all.outputs.tags || steps.meta_ghcr.outputs.tags }}
+        run: |
+          set -euo pipefail
+
+          sources=()
+          for digest_file in /tmp/digests/*; do
+            [ -f "$digest_file" ] || continue
+            sources+=("${{ env.GHCR_IMAGE }}@sha256:$(basename "$digest_file")")
+          done
+
+          if [ "${#sources[@]}" -eq 0 ]; then
+            echo "No digests found to assemble manifest list" >&2
+            exit 1
+          fi
+
+          while IFS= read -r tag; do
+            [ -n "$tag" ] || continue
+            docker buildx imagetools create --tag "$tag" "${sources[@]}"
+          done <<< "$TAGS"
