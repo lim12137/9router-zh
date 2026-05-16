@@ -61,11 +61,12 @@ git diff -- Dockerfile .github/workflows/docker-publish.yml
   - `linux/amd64` 继续跑在 `ubuntu-latest`
   - `linux/arm64` 改跑在原生 `ubuntu-24.04-arm`
 - 每个平台先按 digest 推到 GHCR。
-- 最后由单独的 `publish-manifests` job 汇总 digest，生成 GHCR 和 Docker Hub 的多架构 manifest。
+- 最后由单独的 `publish-manifests` job 汇总 digest，生成 GHCR 的多架构 manifest。
 - cache 改为按平台分开：
   - `buildcache-amd64`
   - `buildcache-arm64`
 - `actions/checkout` 不再强制检出 default branch，改为跟随当前事件 SHA，避免 tag 构建与实际发布提交不一致。
+- workflow 已去掉 Docker Hub 登录、分支判断和多目标发布逻辑，镜像只推 GHCR。
 
 ### Dockerfile
 
