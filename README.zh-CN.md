@@ -14,7 +14,7 @@
 
   <a href="https://trendshift.io/repositories/22628" target="_blank"><img src="https://trendshift.io/api/badge/repositories/22628" alt="decolua%2F9router | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
   
-  [🚀 快速开始](#-快速开始) • [💡 功能特点](#-主要功能) • [📖 设置指南](#-设置指南) • [🌐 网站](https://9router.com)
+  [🚀 快速开始](#-快速开始) • [💡 功能特点](#-主要功能) • [📖 设置指南](#-设置指南) • [📝 中文说明](./docs/README-zh-cn-operations.md) • [🌐 网站](https://9router.com)
 
   [🇻🇳 Tiếng Việt](./i18n/README.vi.md) • [🇨🇳 中文](./i18n/README.zh-CN.md) • [🇯🇵 日本語](./i18n/README.ja-JP.md)
 </div>
@@ -1085,6 +1085,8 @@ docker restart 9router
 docker stop 9router && docker rm 9router
 ```
 
+
+如需了解 Docker 构建、自动同步和仓库镜像同步的完整流程，请查看 [docs/README-zh-cn-operations.md](./docs/README-zh-cn-operations.md)。
 ### 环境变量
 
 | 变量 | 默认值 | 描述 |

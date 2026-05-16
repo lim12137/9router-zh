@@ -1,0 +1,79 @@
+name: Sync Upstream Repository
+
+on:
+  schedule:
+    - cron: "5 2 * * *"
+  workflow_dispatch:
+    inputs:
+      force_push:
+        description: "Push even if no file change (not recommended)"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: sync-upstream-${{ github.ref_name || 'default' }}
+      cancel-in-progress: true
+
+    steps:
+      - name: Checkout current repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sync from decolua/9router
+        id: sync
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          default_branch="${{ github.event.repository.default_branch }}"
+          git checkout "$default_branch"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if git remote get-url upstream >/dev/null 2>&1; then
+            git remote set-url upstream https://github.com/decolua/9router.git
+          else
+            git remote add upstream https://github.com/decolua/9router.git
+          fi
+
+          git fetch upstream "$default_branch"
+          before_sha="$(git rev-parse HEAD)"
+
+          # Keep fork branch aligned with upstream branch history.
+          git merge --ff-only "upstream/$default_branch"
+          after_sha="$(git rev-parse HEAD)"
+
+          if [ "$before_sha" != "$after_sha" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "before_sha=$before_sha" >> "$GITHUB_OUTPUT"
+            echo "after_sha=$after_sha" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "before_sha=$before_sha" >> "$GITHUB_OUTPUT"
+            echo "after_sha=$after_sha" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push synced branch
+        if: ${{ steps.sync.outputs.changed == 'true' || inputs.force_push == true }}
+        shell: bash
+        run: |
+          default_branch="${{ github.event.repository.default_branch }}"
+          git push origin "$default_branch"
+
+      - name: Summary
+        shell: bash
+        run: |
+          echo "default_branch=${{ github.event.repository.default_branch }}"
+          echo "changed=${{ steps.sync.outputs.changed }}"
+          echo "before=${{ steps.sync.outputs.before_sha }}"
+          echo "after=${{ steps.sync.outputs.after_sha }}"
